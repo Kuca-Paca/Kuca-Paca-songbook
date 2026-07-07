@@ -1,5 +1,5 @@
 // Zvýš toto číslo vždy, keď zmeníš index.html — inak telefón bude servovať starú uloženú verziu.
-const CACHE_NAME = 'takt-cache-v1';
+const CACHE_NAME = 'takt-cache-v2';
 
 const ASSETS = [
   './',
