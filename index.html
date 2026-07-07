@@ -170,6 +170,9 @@
     <input type="text" id="csvPathInput" value="songs.csv" style="flex:1;">
     <button class="ghost" onclick="importFromCsv()">⇪ Import CSV</button>
   </div>
+  <div style="display:flex; gap:8px; padding:8px 16px 0;">
+    <button class="ghost" style="flex:1" onclick="exportToCsv()">⇩ Exportovať zálohu (CSV)</button>
+  </div>
   <div class="content" id="songList"></div>
   <button class="fab" onclick="openEdit(null)">+</button>
 </div>
@@ -365,6 +368,10 @@ async function importFromCsv(){
     const res = await fetch(path);
     if(!res.ok) throw new Error('Súbor sa nenašiel (HTTP ' + res.status + ')');
     const text = await res.text();
+    const head = text.trim().slice(0,200).toLowerCase();
+    if(head.startsWith('<!doctype') || head.startsWith('<html') || !head.includes('title')){
+      throw new Error('Toto nevyzerá ako CSV súbor. Ak je to GitHub Gist, over že používaš odkaz z tlačidla "Raw", nie bežnú adresu stránky.');
+    }
     const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
     let added = 0, skipped = 0;
     (parsed.data||[]).forEach(row=>{
@@ -373,11 +380,18 @@ async function importFromCsv(){
       if(songs.some(s=>s.title.toLowerCase()===title.toLowerCase())){ skipped++; return; }
       const lyricsLines = String(row.lyrics||'').split('\n').map(l=>l.trim()).filter(l=>l.length>0);
       if(lyricsLines.length===0) return;
+      let times = lyricsLines.map(()=>null);
+      if(row.times){
+        const parts = String(row.times).split(',');
+        if(parts.length === lyricsLines.length){
+          times = parts.map(v => (v===undefined || v.trim()==='') ? null : parseFloat(v));
+        }
+      }
       songs.push({
         id: uid(),
         title,
         lines: lyricsLines,
-        times: lyricsLines.map(()=>null),
+        times,
         audioUrl: (row.audio||'').trim()
       });
       added++;
@@ -388,6 +402,33 @@ async function importFromCsv(){
   }catch(e){
     showModal('Import z ' + path + ' zlyhal: ' + e.message, [{label:'OK', primary:true}]);
   }
+}
+
+function csvField(v){
+  v = String(v===undefined || v===null ? '' : v);
+  if(/[",\n]/.test(v)) return '"' + v.replace(/"/g,'""') + '"';
+  return v;
+}
+function exportToCsv(){
+  if(songs.length===0){
+    showModal('Zatiaľ nemáš žiadnu pesničku na export.', [{label:'OK', primary:true}]);
+    return;
+  }
+  const rows = [['title','audio','lyrics','times']];
+  songs.forEach(s=>{
+    const timesStr = s.times.map(t => t===null ? '' : t).join(',');
+    rows.push([s.title, s.audioUrl||'', s.lines.join('\n'), timesStr]);
+  });
+  const csv = rows.map(r => r.map(csvField).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'songs.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
 }
 function deleteSong(id){
   showModal('Zmazať túto pesničku aj so synchronizáciou?', [
