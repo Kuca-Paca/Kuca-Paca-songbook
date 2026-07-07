@@ -120,6 +120,10 @@
   }
   input[type=range]{ width:100%; accent-color:var(--red); }
   .seekrow{ padding:0 16px 8px; }
+  .finetune{ padding:0 16px 12px; border-top:1px solid #2a2a28; margin-top:4px; }
+  .finetune-row{ display:flex; align-items:center; gap:8px; padding:8px 0; }
+  .finetune-label{ font-family:'Special Elite',monospace; font-size:11px; color:#8a8a86; width:80px; flex-shrink:0; }
+  .finetune-row .smallbtn{ flex:1; padding:8px 6px; font-size:12px; }
 
   .prompter{
     flex:1; position:relative; overflow:hidden;
@@ -223,6 +227,9 @@
       <button class="playbtn" id="syncPlayBtn" onclick="toggleSyncPlay()">▶</button>
       <button class="smallbtn" onclick="restartSync()">⟲ Reset</button>
     </div>
+    <div class="controls" style="padding-top:0">
+      <button class="smallbtn" id="slowBtn" onclick="toggleSlowMo()">🐢 Spomaliť (0.7x)</button>
+    </div>
   </div>
 
   <div class="toast" id="syncDoneToast">
@@ -255,6 +262,18 @@
       <button class="smallbtn" onclick="seekBy(-5)">-5s</button>
       <button class="playbtn" id="playPlayBtn" onclick="togglePlayPlay()">▶</button>
       <button class="smallbtn" onclick="seekBy(5)">+5s</button>
+    </div>
+    <div class="finetune">
+      <div class="finetune-row">
+        <span class="finetune-label">Celá pieseň</span>
+        <button class="smallbtn" onclick="shiftAllTimes(-0.15)">◀ skôr</button>
+        <button class="smallbtn" onclick="shiftAllTimes(0.15)">neskôr ▶</button>
+      </div>
+      <div class="finetune-row">
+        <span class="finetune-label">Tento riadok</span>
+        <button class="smallbtn" onclick="shiftCurrentLine(-0.15)">◀ skôr</button>
+        <button class="smallbtn" onclick="shiftCurrentLine(0.15)">neskôr ▶</button>
+      </div>
     </div>
   </div>
 </div>
@@ -416,8 +435,36 @@ function saveEdit(){
 }
 
 /* ---------------- shared prompter renderer ---------------- */
+function wrapLineToWidth(text, maxWidth, font){
+  if(!wrapLineToWidth._ctx){
+    wrapLineToWidth._ctx = document.createElement('canvas').getContext('2d');
+  }
+  const ctx = wrapLineToWidth._ctx;
+  ctx.font = font;
+  const words = text.split(' ');
+  const out = [];
+  let cur = '';
+  for(const w of words){
+    const test = cur ? cur + ' ' + w : w;
+    if(cur && ctx.measureText(test).width > maxWidth){
+      out.push(cur);
+      cur = w;
+    } else {
+      cur = test;
+    }
+  }
+  if(cur) out.push(cur);
+  return out.length ? out : [''];
+}
 function buildPrompter(containerInner, lines){
-  containerInner.innerHTML = lines.map((l,i)=>`<div class="pline" data-i="${i}">${escapeHtml(l)}</div>`).join('');
+  // Wrap at the size lines use when "current" (bigger/bolder) so becoming
+  // current never changes the line count and the text doesn't jump/reflow.
+  const maxWidth = Math.max(100, containerInner.clientWidth - 52);
+  const font = "900 30px Archivo, sans-serif";
+  containerInner.innerHTML = lines.map((l,i)=>{
+    const sub = wrapLineToWidth(l, maxWidth, font).map(escapeHtml).join('<br>');
+    return `<div class="pline" data-i="${i}">${sub}</div>`;
+  }).join('');
 }
 function setCurrentIndex(prompterEl, innerEl, idx){
   const kids = innerEl.children;
@@ -474,7 +521,6 @@ function openSync(id){
   if(syncIdx===-1) syncIdx = syncSong.times.length - 1; // fully synced already, allow re-sync from end
   document.getElementById('syncTitle').textContent = syncSong.title;
   document.getElementById('syncDoneToast').classList.remove('show');
-  buildPrompter(document.getElementById('syncPrompterInner'), syncSong.lines);
   showView('view-sync');
   loadAudioForSong(
     syncSong,
@@ -482,9 +528,11 @@ function openSync(id){
     document.getElementById('syncAudioInput'),
     document.getElementById('syncStageBody'),
     ()=>{
+      buildPrompter(document.getElementById('syncPrompterInner'), syncSong.lines);
       updateSyncUI();
       document.getElementById('syncSeek').max = stageAudio.duration || 100;
       stageAudio.addEventListener('timeupdate', ()=>{
+        if(!stageAudio) return;
         document.getElementById('syncSeek').value = stageAudio.currentTime;
       });
       document.getElementById('syncSeek').oninput = (e)=>{ stageAudio.currentTime = e.target.value; };
@@ -501,6 +549,17 @@ function updateSyncUI(){
   setCurrentIndex(document.getElementById('syncPrompter'), document.getElementById('syncPrompterInner'), syncIdx);
 }
 function toggleSyncPlay(){ if(!stageAudio) return; stageAudio.paused ? stageAudio.play() : stageAudio.pause(); }
+function toggleSlowMo(){
+  if(!stageAudio) return;
+  const btn = document.getElementById('slowBtn');
+  if(stageAudio.playbackRate === 1){
+    stageAudio.playbackRate = 0.7;
+    btn.textContent = '🐢 Spomalené — späť na 1x';
+  } else {
+    stageAudio.playbackRate = 1;
+    btn.textContent = '🐢 Spomaliť (0.7x)';
+  }
+}
 function onTap(){
   if(!stageAudio || syncIdx>=syncSong.times.length) return;
   syncSong.times[syncIdx] = stageAudio.currentTime;
@@ -530,7 +589,6 @@ function openPlay(id){
   playSong = findSong(id);
   playIdx = -1;
   document.getElementById('playTitle').textContent = playSong.title;
-  buildPrompter(document.getElementById('playPrompterInner'), playSong.lines);
   document.getElementById('playCounter').textContent = '00 / ' + String(playSong.lines.length).padStart(2,'0');
   showView('view-play');
   loadAudioForSong(
@@ -539,6 +597,7 @@ function openPlay(id){
     document.getElementById('playAudioInput'),
     document.getElementById('playStageBody'),
     ()=>{
+      buildPrompter(document.getElementById('playPrompterInner'), playSong.lines);
       document.getElementById('playSeek').max = stageAudio.duration || 100;
       document.getElementById('playSeek').oninput = (e)=>{ stageAudio.currentTime = e.target.value; };
       stageAudio.addEventListener('timeupdate', onPlayTimeUpdate);
@@ -548,6 +607,7 @@ function openPlay(id){
   );
 }
 function onPlayTimeUpdate(){
+  if(!stageAudio) return;
   document.getElementById('playSeek').value = stageAudio.currentTime;
   const t = stageAudio.currentTime;
   let idx = -1;
@@ -563,6 +623,18 @@ function onPlayTimeUpdate(){
 }
 function togglePlayPlay(){ if(!stageAudio) return; stageAudio.paused ? stageAudio.play() : stageAudio.pause(); }
 function seekBy(sec){ if(stageAudio) stageAudio.currentTime = Math.max(0, stageAudio.currentTime + sec); }
+
+/* ---------------- fine-tuning (offset korekcia) ---------------- */
+function shiftAllTimes(deltaSec){
+  if(!playSong) return;
+  playSong.times = playSong.times.map(t => t===null ? null : Math.max(0, +(t + deltaSec).toFixed(2)));
+  saveSongs(songs);
+}
+function shiftCurrentLine(deltaSec){
+  if(!playSong || playIdx<0 || playIdx>=playSong.times.length) return;
+  playSong.times[playIdx] = Math.max(0, +(playSong.times[playIdx] + deltaSec).toFixed(2));
+  saveSongs(songs);
+}
 
 /* ---------------- exit ---------------- */
 function exitStage(){ goHome(); }
