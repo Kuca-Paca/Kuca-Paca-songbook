@@ -9,8 +9,8 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="TAKT">
-<title>TAKT — text podľa spevu</title>
+<meta name="apple-mobile-web-app-title" content="Kuca-Paca Songy">
+<title>Kuca-Paca Songy — text podľa spevu</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Archivo:wght@500;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -54,13 +54,15 @@
   .primary{
     background:var(--ink); color:var(--cream); border:2px solid var(--ink);
     font-family:'Special Elite',monospace; letter-spacing:.04em; text-transform:uppercase;
-    padding:14px 18px; border-radius:10px; font-size:14px;
+    padding:14px 12px; border-radius:10px; font-size:14px;
+    white-space:normal; line-height:1.25; text-align:center;
   }
   .primary:active{ background:var(--red); border-color:var(--red); }
   .ghost{
     background:none; color:var(--ink); border:2px solid var(--ink);
     font-family:'Special Elite',monospace; letter-spacing:.04em; text-transform:uppercase;
-    padding:12px 16px; border-radius:10px; font-size:13px;
+    padding:12px 10px; border-radius:10px; font-size:13px;
+    white-space:normal; line-height:1.25; text-align:center;
   }
   .stamp{
     display:inline-block; border:2px solid var(--red); color:var(--red);
@@ -163,7 +165,7 @@
 <!-- ============ HOME ============ -->
 <div class="view active" id="view-home">
   <div class="topbar">
-    <h1>TAKT</h1>
+    <h1>Kuca-Paca Songy</h1>
     <span class="eyebrow" style="margin-left:auto">text podľa spevu</span>
   </div>
   <div style="display:flex; gap:8px; padding:12px 16px 0;">
@@ -281,6 +283,25 @@
   </div>
 </div>
 
+<!-- ============ FREE SCROLL (no sync needed) ============ -->
+<div class="view stage" id="view-freescroll">
+  <div class="topbar">
+    <button class="iconbtn" onclick="exitFreeScroll()">←</button>
+    <h1 id="freeTitle" style="font-size:14px; opacity:.85"></h1>
+  </div>
+  <div id="freeScrollBody" style="flex:1; overflow-y:auto; padding:24px 26px 40vh;">
+    <div id="freeScrollText" style="font-family:'Archivo',sans-serif; font-weight:700; font-size:22px; line-height:1.7; color:var(--cream);"></div>
+  </div>
+  <div class="controls" style="flex-direction:column; align-items:stretch; gap:10px;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <button class="smallbtn" onclick="setFreeSpeed(0)">⏸ Stop</button>
+      <input type="range" id="freeSpeedSlider" min="0" max="4" step="0.5" value="0" style="flex:1" oninput="setFreeSpeed(this.value)">
+      <span class="counter" id="freeSpeedLabel">0</span>
+    </div>
+    <div class="eyebrow" style="text-align:center; opacity:.6;">posúvaj aj prstom, keď treba preskočiť</div>
+  </div>
+</div>
+
 <!-- ============ GENERIC MODAL (confirm / fatal error) ============ -->
 <div id="modalOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; align-items:center; justify-content:center;">
   <div style="background:var(--cream); color:var(--ink); padding:22px; border-radius:14px; max-width:320px; text-align:center; font-family:'Special Elite',monospace;">
@@ -345,7 +366,7 @@ function showView(id){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
-function goHome(){ stopAllAudio(); renderHome(); showView('view-home'); }
+function goHome(){ stopAllAudio(); cancelAnimationFrame(freeScrollRAF); renderHome(); showView('view-home'); }
 
 /* ---------------- HOME ---------------- */
 function renderHome(){
@@ -365,9 +386,14 @@ function renderHome(){
       <div class="progressline"><div class="progressfill" style="width:${pct}%"></div></div>
       <div class="row">
         <button class="ghost" onclick="openEdit('${s.id}')">Upraviť</button>
-        <button class="ghost" onclick="openSync('${s.id}')">${full? 'Re-sync':'Synchronizovať'}</button>
-        <button class="primary" ${full?'':'disabled style="opacity:.4"'} onclick="${full? `openPlay('${s.id}')` : ''}">Prehrať</button>
-        <button class="ghost" style="border-color:var(--red); color:var(--red)" onclick="deleteSong('${s.id}')">✕</button>
+        <button class="ghost" onclick="openSync('${s.id}')">${full? 'Re-sync':'Sync'}</button>
+      </div>
+      <div class="row">
+        <button class="primary" ${full?'':'disabled style="opacity:.4"'} onclick="${full? `openPlay('${s.id}')` : ''}">▶ Prehrať</button>
+        <button class="ghost" onclick="openFreeScroll('${s.id}')">📜 Voľne</button>
+      </div>
+      <div class="row">
+        <button class="ghost" style="border-color:var(--red); color:var(--red)" onclick="deleteSong('${s.id}')">✕ Zmazať</button>
       </div>
     </div>`;
   }).join('');
@@ -691,6 +717,43 @@ function shiftCurrentLine(deltaSec){
 
 /* ---------------- exit ---------------- */
 function exitStage(){ goHome(); }
+
+/* ---------------- FREE SCROLL (no sync needed) ---------------- */
+let freeScrollSong = null, freeScrollSpeed = 0, freeScrollRAF = null, freeScrollLastTs = null;
+function openFreeScroll(id){
+  freeScrollSong = findSong(id);
+  document.getElementById('freeTitle').textContent = freeScrollSong.title;
+  document.getElementById('freeScrollText').innerHTML =
+    freeScrollSong.lines.map(l=>`<p style="margin:0 0 1.1em;">${escapeHtml(l)}</p>`).join('');
+  document.getElementById('freeScrollBody').scrollTop = 0;
+  freeScrollSpeed = 0;
+  updateFreeSpeedUI();
+  showView('view-freescroll');
+  cancelAnimationFrame(freeScrollRAF);
+  freeScrollLastTs = null;
+  freeScrollRAF = requestAnimationFrame(freeScrollStep);
+}
+function freeScrollStep(ts){
+  if(!document.getElementById('view-freescroll').classList.contains('active')) return;
+  if(freeScrollLastTs !== null && freeScrollSpeed > 0){
+    const dt = (ts - freeScrollLastTs) / 1000;
+    document.getElementById('freeScrollBody').scrollTop += freeScrollSpeed * 14 * dt;
+  }
+  freeScrollLastTs = ts;
+  freeScrollRAF = requestAnimationFrame(freeScrollStep);
+}
+function setFreeSpeed(v){
+  freeScrollSpeed = Math.max(0, Math.min(4, parseFloat(v)));
+  updateFreeSpeedUI();
+}
+function updateFreeSpeedUI(){
+  document.getElementById('freeSpeedSlider').value = freeScrollSpeed;
+  document.getElementById('freeSpeedLabel').textContent = freeScrollSpeed === 0 ? 'STOP' : String(freeScrollSpeed);
+}
+function exitFreeScroll(){
+  cancelAnimationFrame(freeScrollRAF);
+  goHome();
+}
 
 /* ---------------- init ---------------- */
 renderHome();
