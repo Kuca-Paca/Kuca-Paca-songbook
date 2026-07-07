@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#141412">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-48.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TAKT">
+<title>TAKT — text podľa spevu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Archivo:wght@500;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root{
+    --paper:#E6E1D3;
+    --paper-line:#c9c2ac;
+    --ink:#17110E;
+    --stage:#0D0D0C;
+    --red:#D62839;
+    --amber:#E8A33D;
+    --cream:#F2EEE2;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    height:100%; margin:0; overflow:hidden; position:fixed; inset:0;
+    background:var(--paper); color:var(--ink);
+    font-family:'Archivo',sans-serif;
+    overscroll-behavior:none; user-select:none;
+  }
+  .view{ position:absolute; inset:0; display:none; flex-direction:column; }
+  .view.active{ display:flex; }
+
+  /* ---------- shared bits ---------- */
+  .eyebrow{
+    font-family:'Special Elite',monospace; letter-spacing:.08em; text-transform:uppercase;
+    font-size:12px; color:var(--ink); opacity:.7;
+  }
+  .topbar{
+    display:flex; align-items:center; gap:12px; padding:16px 18px;
+    padding-top:max(16px, env(safe-area-inset-top));
+    border-bottom:2px solid var(--ink);
+  }
+  .topbar h1{ font-family:'Special Elite',monospace; font-size:18px; margin:0; letter-spacing:.03em; }
+  .iconbtn{
+    background:none; border:2px solid var(--ink); color:var(--ink); border-radius:8px;
+    width:40px; height:40px; font-size:18px; display:flex; align-items:center; justify-content:center;
+    font-family:'Special Elite',monospace;
+  }
+  .iconbtn:active{ background:var(--ink); color:var(--paper); }
+  .primary{
+    background:var(--ink); color:var(--cream); border:2px solid var(--ink);
+    font-family:'Special Elite',monospace; letter-spacing:.04em; text-transform:uppercase;
+    padding:14px 18px; border-radius:10px; font-size:14px;
+  }
+  .primary:active{ background:var(--red); border-color:var(--red); }
+  .ghost{
+    background:none; color:var(--ink); border:2px solid var(--ink);
+    font-family:'Special Elite',monospace; letter-spacing:.04em; text-transform:uppercase;
+    padding:12px 16px; border-radius:10px; font-size:13px;
+  }
+  .stamp{
+    display:inline-block; border:2px solid var(--red); color:var(--red);
+    font-family:'Special Elite',monospace; text-transform:uppercase; font-size:11px;
+    padding:3px 8px; border-radius:4px; transform:rotate(-3deg); letter-spacing:.06em;
+  }
+  .counter{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:700;
+    background:#000; color:var(--amber); padding:6px 10px; border-radius:6px;
+    font-size:14px; letter-spacing:.08em; font-variant-numeric:tabular-nums;
+  }
+
+  /* ---------- HOME ---------- */
+  #view-home .content{ flex:1; overflow-y:auto; padding:16px; }
+  .songcard{
+    border:2px solid var(--ink); border-radius:12px; padding:14px 16px; margin-bottom:14px;
+    background:var(--cream);
+  }
+  .songcard h3{ margin:0 0 6px; font-size:17px; }
+  .progressline{ height:6px; background:var(--paper-line); border-radius:4px; overflow:hidden; margin:8px 0; }
+  .progressfill{ height:100%; background:var(--red); }
+  .songcard .meta{ font-size:12px; opacity:.7; margin-bottom:10px; }
+  .songcard .row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .row button{ flex:1; min-width:80px; }
+  .fab{
+    position:fixed; right:20px; bottom:calc(20px + env(safe-area-inset-bottom));
+    width:60px; height:60px; border-radius:50%; background:var(--red); color:#fff;
+    border:none; font-size:28px; box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+  .empty{ text-align:center; margin-top:60px; opacity:.6; font-size:14px; padding:0 30px; }
+
+  /* ---------- EDIT ---------- */
+  #view-edit .content{ flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:14px; }
+  label.field-label{ font-family:'Special Elite',monospace; font-size:12px; text-transform:uppercase; letter-spacing:.06em; opacity:.75; margin-bottom:6px; display:block; }
+  input[type=text], textarea{
+    width:100%; border:2px solid var(--ink); background:var(--cream); color:var(--ink);
+    border-radius:10px; padding:12px; font-family:'Archivo',sans-serif; font-size:15px;
+  }
+  textarea{ resize:vertical; min-height:220px; line-height:1.5; }
+  .hint{ font-size:12px; opacity:.65; margin-top:4px; }
+
+  /* ---------- STAGE (sync + play share this) ---------- */
+  .stage{ background:var(--stage); color:var(--cream); flex:1; display:flex; flex-direction:column; }
+  .stage .topbar{ border-bottom-color:#333; }
+  .stage .topbar h1{ color:var(--cream); }
+  .stage .iconbtn{ border-color:#555; color:var(--cream); }
+  .controls{
+    display:flex; align-items:center; justify-content:center; gap:14px; padding:14px;
+    border-top:1px solid #2a2a28;
+  }
+  .playbtn{
+    width:56px; height:56px; border-radius:50%; background:var(--red); border:none; color:#fff; font-size:20px;
+  }
+  .smallbtn{
+    background:#1e1e1c; color:var(--cream); border:1px solid #444; border-radius:8px;
+    padding:10px 14px; font-family:ui-monospace,monospace; font-size:13px;
+  }
+  input[type=range]{ width:100%; accent-color:var(--red); }
+  .seekrow{ padding:0 16px 8px; }
+
+  .prompter{
+    flex:1; position:relative; overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+    mask-image:linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+  }
+  .prompter-inner{ position:absolute; left:0; right:0; top:0; transition:transform .35s cubic-bezier(.2,.8,.2,1); padding:0 26px; }
+  .pline{
+    font-family:'Archivo',sans-serif; font-weight:700; font-size:19px; line-height:1.4;
+    text-align:center; padding:10px 0; color:#5c5c58; transition:color .3s, font-size .3s, opacity .3s; opacity:.55;
+  }
+  .pline.current{ color:var(--cream); font-size:30px; font-weight:900; opacity:1; position:relative; }
+  .pline.current::after{
+    content:""; display:block; width:46px; height:4px; background:var(--red); margin:8px auto 0; border-radius:3px;
+  }
+  .pline.past{ opacity:.28; }
+
+  .taphint{
+    text-align:center; padding:14px; font-family:'Special Elite',monospace; font-size:12px;
+    color:var(--amber); letter-spacing:.05em; text-transform:uppercase;
+  }
+  .tapzone{ flex:1; }
+  .filepicker{ margin:auto; text-align:center; padding:30px; }
+  .filepicker input{ margin-top:14px; }
+
+  .toast{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    background:var(--cream); color:var(--ink); padding:20px 26px; border-radius:14px; text-align:center;
+    font-family:'Special Elite',monospace; box-shadow:0 8px 30px rgba(0,0,0,.5); display:none; z-index:5;
+  }
+  .toast.show{ display:block; }
+  .toast .row{ display:flex; gap:10px; margin-top:14px; justify-content:center; }
+</style>
+</head>
+<body>
+
+<!-- ============ HOME ============ -->
+<div class="view active" id="view-home">
+  <div class="topbar">
+    <h1>TAKT</h1>
+    <span class="eyebrow" style="margin-left:auto">text podľa spevu</span>
+  </div>
+  <div style="display:flex; gap:8px; padding:12px 16px 0;">
+    <input type="text" id="csvPathInput" value="songs.csv" style="flex:1;">
+    <button class="ghost" onclick="importFromCsv()">⇪ Import CSV</button>
+  </div>
+  <div class="content" id="songList"></div>
+  <button class="fab" onclick="openEdit(null)">+</button>
+</div>
+
+<!-- ============ EDIT ============ -->
+<div class="view" id="view-edit">
+  <div class="topbar">
+    <button class="iconbtn" onclick="goHome()">←</button>
+    <h1 id="editTitleLabel">Nová pesnička</h1>
+  </div>
+  <div class="content">
+    <div>
+      <label class="field-label">Názov piesne</label>
+      <input type="text" id="inpTitle" placeholder="napr. Holubica mieru">
+    </div>
+    <div>
+      <label class="field-label">Text piesne</label>
+      <textarea id="inpLyrics" placeholder="Vlož text — každý verš / riadok na nový riadok. Refrén píš znova tam, kde sa v piesni naozaj opakuje."></textarea>
+      <div class="hint">Prázdne riadky sa preskočia. Poradie riadkov = poradie ako sa spievajú.</div>
+    </div>
+    <div>
+      <label class="field-label">Zvuková stopa (nepovinné)</label>
+      <input type="text" id="inpAudio" placeholder="napr. audio/holubica.mp3 — nechaj prázdne a vyberieš súbor ručne">
+      <div class="hint">Ak nahráš mp3 do rovnakého repa a napíšeš sem cestu, načíta sa automaticky. Inak sa ťa app spýta pri synchronizácii.</div>
+    </div>
+    <div id="editError" style="display:none; color:var(--red); font-family:'Special Elite',monospace; font-size:13px;"></div>
+  </div>
+  <div class="controls" style="border-top:2px solid var(--ink); background:var(--paper)">
+    <button class="ghost" onclick="goHome()" style="flex:1">Zrušiť</button>
+    <button class="primary" onclick="saveEdit()" style="flex:2">Uložiť a synchronizovať →</button>
+  </div>
+</div>
+
+<!-- ============ SYNC ============ -->
+<div class="view stage" id="view-sync">
+  <div class="topbar">
+    <button class="iconbtn" onclick="exitStage()">←</button>
+    <h1 id="syncTitle" style="font-size:14px; opacity:.85"></h1>
+    <span class="counter" id="syncCounter" style="margin-left:auto">00 / 00</span>
+  </div>
+
+  <div id="syncFilePicker" class="filepicker" style="display:none">
+    <div class="eyebrow" style="color:var(--amber)">Chýba zvuk</div>
+    <p style="opacity:.8">Vyber súbor z telefónu, aby si mohol ťukať do rytmu spevu.</p>
+    <input type="file" accept="audio/*" id="syncAudioInput">
+  </div>
+
+  <div id="syncStageBody" style="display:none; flex:1; flex-direction:column;">
+    <div class="taphint">Stlač ▶ a potom ťukni vždy, keď spevák začne ďalší riadok</div>
+    <div class="prompter" id="syncPrompter"><div class="prompter-inner" id="syncPrompterInner"></div></div>
+    <div class="tapzone" id="syncTapZone" style="position:absolute; inset:0; top:110px; bottom:150px;"></div>
+    <div class="seekrow"><input type="range" id="syncSeek" min="0" max="100" value="0" step="0.1"></div>
+    <div class="controls">
+      <button class="smallbtn" onclick="undoTap()">↺ Vrátiť</button>
+      <button class="playbtn" id="syncPlayBtn" onclick="toggleSyncPlay()">▶</button>
+      <button class="smallbtn" onclick="restartSync()">⟲ Reset</button>
+    </div>
+  </div>
+
+  <div class="toast" id="syncDoneToast">
+    <div>✓ Hotovo, synchronizované a uložené</div>
+    <div class="row">
+      <button class="ghost" style="border-color:#fff;color:#fff" onclick="closeSyncToastToHome()">Zoznam</button>
+      <button class="primary" onclick="closeSyncToastToPlay()">Prehrať</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PLAY ============ -->
+<div class="view stage" id="view-play">
+  <div class="topbar">
+    <button class="iconbtn" onclick="exitStage()">←</button>
+    <h1 id="playTitle" style="font-size:14px; opacity:.85"></h1>
+    <span class="counter" id="playCounter" style="margin-left:auto">00 / 00</span>
+  </div>
+
+  <div id="playFilePicker" class="filepicker" style="display:none">
+    <div class="eyebrow" style="color:var(--amber)">Chýba zvuk</div>
+    <p style="opacity:.8">Vyber súbor z telefónu na prehratie.</p>
+    <input type="file" accept="audio/*" id="playAudioInput">
+  </div>
+
+  <div id="playStageBody" style="display:none; flex:1; flex-direction:column;">
+    <div class="prompter" id="playPrompter"><div class="prompter-inner" id="playPrompterInner"></div></div>
+    <div class="seekrow"><input type="range" id="playSeek" min="0" max="100" value="0" step="0.1"></div>
+    <div class="controls">
+      <button class="smallbtn" onclick="seekBy(-5)">-5s</button>
+      <button class="playbtn" id="playPlayBtn" onclick="togglePlayPlay()">▶</button>
+      <button class="smallbtn" onclick="seekBy(5)">+5s</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GENERIC MODAL (confirm / fatal error) ============ -->
+<div id="modalOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; align-items:center; justify-content:center;">
+  <div style="background:var(--cream); color:var(--ink); padding:22px; border-radius:14px; max-width:320px; text-align:center; font-family:'Special Elite',monospace;">
+    <div id="modalMsg" style="margin-bottom:16px; font-size:14px; line-height:1.5;"></div>
+    <div id="modalButtons" style="display:flex; gap:10px; justify-content:center;"></div>
+  </div>
+</div>
+
+<script>
+/* ---------------- modal helper ---------------- */
+function showModal(message, buttons){
+  document.getElementById('modalMsg').textContent = message;
+  const wrap = document.getElementById('modalButtons');
+  wrap.innerHTML = '';
+  buttons.forEach(b=>{
+    const el = document.createElement('button');
+    el.className = b.primary ? 'primary' : 'ghost';
+    el.textContent = b.label;
+    el.onclick = ()=>{ hideModal(); if(b.onClick) b.onClick(); };
+    wrap.appendChild(el);
+  });
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+function hideModal(){ document.getElementById('modalOverlay').style.display = 'none'; }
+
+/* ---------------- crash safety net ----------------
+   If anything throws unexpectedly, show it on screen instead of a silent blank view. */
+window.addEventListener('error', function(e){
+  try{
+    showModal('Nastala chyba: ' + (e.message || 'neznáma') + '\n\nSkús sa vrátiť na zoznam a otvoriť pesničku znova.', [
+      { label:'Späť na zoznam', primary:true, onClick: ()=>{ location.reload(); } }
+    ]);
+  }catch(_){ /* ignore */ }
+});
+
+/* ---------------- storage ---------------- */
+const STORE_KEY = 'takt_v1_songs';
+function loadSongs(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }catch(e){ return []; } }
+function saveSongs(s){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
+  catch(e){ console.warn('Uloženie zlyhalo (úložisko nedostupné), pokračujem len v pamäti:', e); }
+}
+let songs = loadSongs();
+
+function uid(){ return 's_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); }
+function findSong(id){ return songs.find(s=>s.id===id); }
+
+/* ---------------- view switching ---------------- */
+function showView(id){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function goHome(){ stopAllAudio(); renderHome(); showView('view-home'); }
+
+/* ---------------- HOME ---------------- */
+function renderHome(){
+  const list = document.getElementById('songList');
+  if(songs.length===0){
+    list.innerHTML = '<div class="empty">Zatiaľ žiadna pesnička.<br>Ťukni na + a pridaj prvú.</div>';
+    return;
+  }
+  list.innerHTML = songs.map(s=>{
+    const total = s.lines.length;
+    const done = s.times.filter(t=>t!==null).length;
+    const pct = total ? Math.round(done/total*100) : 0;
+    const full = done===total && total>0;
+    return `<div class="songcard">
+      <h3>${escapeHtml(s.title)}</h3>
+      <div class="meta">${done}/${total} riadkov synchronizovaných</div>
+      <div class="progressline"><div class="progressfill" style="width:${pct}%"></div></div>
+      <div class="row">
+        <button class="ghost" onclick="openEdit('${s.id}')">Upraviť</button>
+        <button class="ghost" onclick="openSync('${s.id}')">${full? 'Re-sync':'Synchronizovať'}</button>
+        <button class="primary" ${full?'':'disabled style="opacity:.4"'} onclick="${full? `openPlay('${s.id}')` : ''}">Prehrať</button>
+        <button class="ghost" style="border-color:var(--red); color:var(--red)" onclick="deleteSong('${s.id}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function escapeHtml(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+
+async function importFromCsv(){
+  const path = document.getElementById('csvPathInput').value.trim() || 'songs.csv';
+  try{
+    const res = await fetch(path);
+    if(!res.ok) throw new Error('Súbor sa nenašiel (HTTP ' + res.status + ')');
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header:true, skipEmptyLines:true });
+    let added = 0, skipped = 0;
+    (parsed.data||[]).forEach(row=>{
+      const title = (row.title||'').trim();
+      if(!title) return;
+      if(songs.some(s=>s.title.toLowerCase()===title.toLowerCase())){ skipped++; return; }
+      const lyricsLines = String(row.lyrics||'').split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+      if(lyricsLines.length===0) return;
+      songs.push({
+        id: uid(),
+        title,
+        lines: lyricsLines,
+        times: lyricsLines.map(()=>null),
+        audioUrl: (row.audio||'').trim()
+      });
+      added++;
+    });
+    saveSongs(songs);
+    renderHome();
+    showModal(`Import hotový: ${added} pridaných, ${skipped} preskočených (už existovali).`, [{label:'OK', primary:true}]);
+  }catch(e){
+    showModal('Import z ' + path + ' zlyhal: ' + e.message, [{label:'OK', primary:true}]);
+  }
+}
+function deleteSong(id){
+  showModal('Zmazať túto pesničku aj so synchronizáciou?', [
+    { label:'Zrušiť' },
+    { label:'Zmazať', primary:true, onClick: ()=>{
+        songs = songs.filter(s=>s.id!==id); saveSongs(songs); renderHome();
+    }}
+  ]);
+}
+
+/* ---------------- EDIT ---------------- */
+let editingId = null;
+function openEdit(id){
+  editingId = id;
+  const s = id ? findSong(id) : null;
+  document.getElementById('editTitleLabel').textContent = s ? 'Upraviť pesničku' : 'Nová pesnička';
+  document.getElementById('inpTitle').value = s ? s.title : '';
+  document.getElementById('inpLyrics').value = s ? s.lines.join('\n') : '';
+  document.getElementById('inpAudio').value = s ? (s.audioUrl||'') : '';
+  showView('view-edit');
+}
+function saveEdit(){
+  const title = document.getElementById('inpTitle').value.trim() || 'Bez názvu';
+  const lines = document.getElementById('inpLyrics').value.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+  const audioUrl = document.getElementById('inpAudio').value.trim();
+  const errEl = document.getElementById('editError');
+  if(lines.length===0){
+    errEl.textContent = 'Vlož aspoň jeden riadok textu, nech je čo synchronizovať.';
+    errEl.style.display = 'block';
+    return;
+  }
+  errEl.style.display = 'none';
+
+  if(editingId){
+    const s = findSong(editingId);
+    const linesChanged = JSON.stringify(s.lines) !== JSON.stringify(lines);
+    s.title = title; s.audioUrl = audioUrl;
+    if(linesChanged){ s.lines = lines; s.times = lines.map(()=>null); }
+  } else {
+    editingId = uid();
+    songs.push({ id: editingId, title, lines, times: lines.map(()=>null), audioUrl });
+  }
+  saveSongs(songs);
+  openSync(editingId);
+}
+
+/* ---------------- shared prompter renderer ---------------- */
+function buildPrompter(containerInner, lines){
+  containerInner.innerHTML = lines.map((l,i)=>`<div class="pline" data-i="${i}">${escapeHtml(l)}</div>`).join('');
+}
+function setCurrentIndex(prompterEl, innerEl, idx){
+  const kids = innerEl.children;
+  for(let i=0;i<kids.length;i++){
+    kids[i].classList.remove('current','past');
+    if(i<idx) kids[i].classList.add('past');
+    if(i===idx) kids[i].classList.add('current');
+  }
+  const target = kids[Math.max(idx,0)];
+  if(!target) return;
+  const ph = prompterEl.clientHeight;
+  const offset = target.offsetTop + target.offsetHeight/2 - ph/2;
+  innerEl.style.transform = `translateY(${-offset}px)`;
+}
+
+/* ---------------- audio helpers ---------------- */
+let stageAudio = null;
+function stopAllAudio(){
+  if(stageAudio){ stageAudio.pause(); stageAudio.src=''; stageAudio=null; }
+}
+function loadAudioForSong(song, filePickerWrap, fileInputEl, bodyWrap, onReady){
+  stopAllAudio();
+  stageAudio = new Audio();
+  const tryFallback = ()=>{
+    filePickerWrap.style.display='flex';
+    bodyWrap.style.display='none';
+  };
+  if(song.audioUrl){
+    stageAudio.src = song.audioUrl;
+    stageAudio.addEventListener('error', tryFallback, {once:true});
+    stageAudio.addEventListener('loadedmetadata', ()=>{
+      filePickerWrap.style.display='none';
+      bodyWrap.style.display='flex';
+      onReady();
+    }, {once:true});
+  } else {
+    tryFallback();
+  }
+  fileInputEl.onchange = (e)=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    stageAudio.src = URL.createObjectURL(f);
+    filePickerWrap.style.display='none';
+    bodyWrap.style.display='flex';
+    onReady();
+  };
+}
+
+/* ---------------- SYNC view ---------------- */
+let syncSong = null, syncIdx = 0;
+function openSync(id){
+  syncSong = findSong(id);
+  syncIdx = syncSong.times.findIndex(t=>t===null);
+  if(syncIdx===-1) syncIdx = syncSong.times.length - 1; // fully synced already, allow re-sync from end
+  document.getElementById('syncTitle').textContent = syncSong.title;
+  document.getElementById('syncDoneToast').classList.remove('show');
+  buildPrompter(document.getElementById('syncPrompterInner'), syncSong.lines);
+  showView('view-sync');
+  loadAudioForSong(
+    syncSong,
+    document.getElementById('syncFilePicker'),
+    document.getElementById('syncAudioInput'),
+    document.getElementById('syncStageBody'),
+    ()=>{
+      updateSyncUI();
+      document.getElementById('syncSeek').max = stageAudio.duration || 100;
+      stageAudio.addEventListener('timeupdate', ()=>{
+        document.getElementById('syncSeek').value = stageAudio.currentTime;
+      });
+      document.getElementById('syncSeek').oninput = (e)=>{ stageAudio.currentTime = e.target.value; };
+      document.getElementById('syncTapZone').onpointerdown = onTap;
+      stageAudio.addEventListener('play', ()=>document.getElementById('syncPlayBtn').textContent='❚❚');
+      stageAudio.addEventListener('pause', ()=>document.getElementById('syncPlayBtn').textContent='▶');
+    }
+  );
+}
+function updateSyncUI(){
+  const total = syncSong.lines.length;
+  document.getElementById('syncCounter').textContent =
+    String(Math.min(syncIdx+1,total)).padStart(2,'0') + ' / ' + String(total).padStart(2,'0');
+  setCurrentIndex(document.getElementById('syncPrompter'), document.getElementById('syncPrompterInner'), syncIdx);
+}
+function toggleSyncPlay(){ if(!stageAudio) return; stageAudio.paused ? stageAudio.play() : stageAudio.pause(); }
+function onTap(){
+  if(!stageAudio || syncIdx>=syncSong.times.length) return;
+  syncSong.times[syncIdx] = stageAudio.currentTime;
+  saveSongs(songs);
+  syncIdx++;
+  if(syncIdx>=syncSong.times.length){
+    stageAudio.pause();
+    document.getElementById('syncDoneToast').classList.add('show');
+    return;
+  }
+  updateSyncUI();
+}
+function undoTap(){
+  if(syncIdx>0){ syncIdx--; syncSong.times[syncIdx]=null; saveSongs(songs); updateSyncUI(); }
+}
+function restartSync(){
+  syncSong.times = syncSong.lines.map(()=>null);
+  saveSongs(songs); syncIdx=0; stageAudio.currentTime=0; updateSyncUI();
+  document.getElementById('syncDoneToast').classList.remove('show');
+}
+function closeSyncToastToHome(){ document.getElementById('syncDoneToast').classList.remove('show'); goHome(); }
+function closeSyncToastToPlay(){ document.getElementById('syncDoneToast').classList.remove('show'); openPlay(syncSong.id); }
+
+/* ---------------- PLAY view ---------------- */
+let playSong = null, playIdx = -1;
+function openPlay(id){
+  playSong = findSong(id);
+  playIdx = -1;
+  document.getElementById('playTitle').textContent = playSong.title;
+  buildPrompter(document.getElementById('playPrompterInner'), playSong.lines);
+  document.getElementById('playCounter').textContent = '00 / ' + String(playSong.lines.length).padStart(2,'0');
+  showView('view-play');
+  loadAudioForSong(
+    playSong,
+    document.getElementById('playFilePicker'),
+    document.getElementById('playAudioInput'),
+    document.getElementById('playStageBody'),
+    ()=>{
+      document.getElementById('playSeek').max = stageAudio.duration || 100;
+      document.getElementById('playSeek').oninput = (e)=>{ stageAudio.currentTime = e.target.value; };
+      stageAudio.addEventListener('timeupdate', onPlayTimeUpdate);
+      stageAudio.addEventListener('play', ()=>document.getElementById('playPlayBtn').textContent='❚❚');
+      stageAudio.addEventListener('pause', ()=>document.getElementById('playPlayBtn').textContent='▶');
+    }
+  );
+}
+function onPlayTimeUpdate(){
+  document.getElementById('playSeek').value = stageAudio.currentTime;
+  const t = stageAudio.currentTime;
+  let idx = -1;
+  for(let i=0;i<playSong.times.length;i++){
+    if(playSong.times[i]!==null && playSong.times[i]<=t) idx=i; else break;
+  }
+  if(idx!==playIdx){
+    playIdx = idx;
+    setCurrentIndex(document.getElementById('playPrompter'), document.getElementById('playPrompterInner'), Math.max(idx,0));
+    document.getElementById('playCounter').textContent =
+      String(Math.max(idx+1,0)).padStart(2,'0') + ' / ' + String(playSong.lines.length).padStart(2,'0');
+  }
+}
+function togglePlayPlay(){ if(!stageAudio) return; stageAudio.paused ? stageAudio.play() : stageAudio.pause(); }
+function seekBy(sec){ if(stageAudio) stageAudio.currentTime = Math.max(0, stageAudio.currentTime + sec); }
+
+/* ---------------- exit ---------------- */
+function exitStage(){ goHome(); }
+
+/* ---------------- init ---------------- */
+renderHome();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(err=>console.warn('SW sa nezaregistroval:', err));
+  });
+}
+</script>
+</body>
+</html>
